@@ -1,0 +1,637 @@
+[![pub package](https://img.shields.io/pub/v/wasmjsgen.svg)](https://pub.dev/packages/wasmjsgen)
+[![Build Status](https://github.com/thlorenz/wasmjsgen/workflows/Dart%20CI/badge.svg)](https://github.com/thlorenz/wasmjsgen/actions?query=workflow%3A"Dart+CI")
+
+Binding generator for Wasmjs flavor of [FFI](https://dart.dev/guides/libraries/c-interop) bindings.
+
+> Note: wasmjsgen only supports parsing `C` headers.
+
+**Status**: Alpha, not all features are supported, but small apps can be built with it, see
+[this example](https://thlorenz.com/rid-examples/todo_cubit).
+
+The parameter and return types share native FFI names, i.e. `Pointer<Uint8>` in order to allow
+consuming code to remain unchanged and switch from native FFI to WASM via conditional imports.
+
+_The below Readme was modified from the _ffigen_ Readme and hasn't been fully updated yet_.
+
+## Example
+
+For some header file _example.h_:
+```C
+int sum(int a, int b);
+```
+Add configurations to Pubspec File:
+```yaml
+wasmjsgen:
+  allocate: 'my_malloc'
+  output: 'generated_bindings.dart'
+  headers:
+    entry-points:
+      - 'example.h'
+```
+
+**NOTE**: that wasmjsgen adds _allocate_, _dealloate_ and _reallocate_ functions that are used
+to manage memory. At the very least you will need to specify _allocate` if you want to send
+`String`s from Dart to Wasm.
+
+Output (_generated_bindings.dart_).
+```dart
+class NativeLibrary {
+  /// The symbol lookup function.
+  T lookup<T>(String name) {
+    return _wasmInstance.functions[name] as T;
+  }
+
+  wasm_interop.Memory get memory {
+    return _wasmInstance.memories['memory']!;
+  }
+
+  dart_typed.Uint8List get memView {
+    return _wasmInstance.memories['memory']!.buffer.asUint8List();
+  }
+
+  [ .. ]
+  
+  // --- dividePercision ---
+  /// Divides 2 floats, returns a pointer to double.
+  Pointer<Double> dividePercision(
+    Pointer<Float> a,
+    Pointer<Float> b,
+  ) {
+    return Pointer.fromAddress(
+      Double(
+        _dividePercision(
+          a.address,
+          b.address,
+        ),
+      ),
+    );
+  }
+
+  late final int Function(
+    int,
+    int,
+  ) _dividePercision = lookup('dividePercision');
+  
+  [ .. ]
+  
+}
+```
+## Using this package
+- Add `wasmjsgen` under `dev_dependencies` in your `pubspec.yaml`.
+- Install LLVM (see [Installing LLVM](#installing-llvm)).
+- Configurations must be provided in `pubspec.yaml` or in a custom YAML file (see [configurations](#configurations)).
+- Run the tool- `dart run wasmjsgen`.
+
+Jump to [FAQ](#faq).
+
+## Installing LLVM
+`package:wasmjsgen` uses LLVM. Install LLVM (9+) in the following way.
+
+#### ubuntu/linux
+1. Install libclangdev - `sudo apt-get install libclang-dev`.
+
+#### Windows
+1. Install Visual Studio with C++ development support.
+2. Install [LLVM](https://releases.llvm.org/download.html) or `winget install -e --id LLVM.LLVM`.
+
+#### MacOS
+1. Install Xcode.
+2. Install LLVM - `brew install llvm`.
+
+---
+# From FFIgen Readme
+
+## Configurations
+Configurations can be provided in 2 ways-
+1. In the project's `pubspec.yaml` file under the key `wasmjsgen`.
+2. Via a custom YAML file, then specify this file while running -
+`dart run wasmjsgen --config config.yaml`
+
+The following configuration options are available-
+<table>
+<thead>
+  <tr>
+    <th>Key</th>
+    <th>Explaination</th>
+    <th>Example</th>
+  </tr>
+  <colgroup>
+      <col>
+      <col style="width: 100px;">
+  </colgroup>
+</thead>
+<tbody>
+  <tr>
+    <td>output<br><i><b>(Required)</b></i></td>
+    <td>Output path of the generated bindings.</td>
+    <td>
+
+```yaml
+output: 'generated_bindings.dart'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>llvm-path</td>
+    <td>Path to <i>llvm</i> folder.<br> ffigen will sequentially search
+    for `lib/libclang.so` on linux, `lib/libclang.dylib` on macOs and
+    `bin\libclang.dll` on windows, in the specified paths.<br><br>
+    Complete path to the dynamic library can also be supplied.<br>
+    <i>Required</i> if ffigen is unable to find this at default locations.</td>
+    <td>
+
+```yaml
+llvm-path:
+  - '/usr/local/opt/llvm'
+  - 'C:\Program Files\llvm`
+  - '/usr/lib/llvm-11'
+  # Specify exact path to dylib
+  - '/usr/lib64/libclang.so'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>headers<br><i><b>(Required)</b></i></td>
+    <td>The header entry-points and include-directives. Glob syntax is allowed.<br>
+    If include-directives are not specified ffigen will generate everything directly/transitively under the entry-points.</td>
+    <td>
+
+```yaml
+headers:
+  entry-points:
+    - 'folder/**.h'
+    - 'folder/specific_header.h'
+  include-directives:
+    - '**index.h'
+    - '**/clang-c/**'
+    - '/full/path/to/a/header.h'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>name<br><i>(Prefer)</i></td>
+    <td>Name of generated class.</td>
+    <td>
+
+```yaml
+name: 'SQLite'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>description<br><i>(Prefer)</i></td>
+    <td>Dart Doc for generated class.</td>
+    <td>
+
+```yaml
+description: 'Bindings to SQLite'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>compiler-opts</td>
+    <td>Pass compiler options to clang. You can also pass
+    these via the command line tool.</td>
+    <td>
+
+```yaml
+compiler-opts:
+  - '-I/usr/lib/llvm-9/include/'
+```
+and/or via the command line -
+```bash
+dart run ffigen --compiler-opts "-I/headers
+-L 'path/to/folder name/file'"
+```
+  </td>
+  </tr>
+    <tr>
+    <td>compiler-opts-automatic -> macos -> include-c-standard-library</td>
+    <td>Tries to automatically find and add C standard library path to
+    compiler-opts on macos.<br>
+    <b>Default: true</b>
+    </td>
+    <td>
+
+```yaml
+compiler-opts-automatic:
+  macos:
+    include-c-standard-library: false
+```
+  </td>
+  </tr>
+  <tr>
+    <td>functions<br><br>structs<br><br>unions<br><br>enums<br><br>unnamed-enums<br><br>macros<br><br>globals</td>
+    <td>Filters for declarations.<br><b>Default: all are included.</b><br><br>
+    Options -<br>
+    - Include/Exclude declarations.<br>
+    - Rename declarations.<br>
+    - Rename enum and struct members.<br>
+    - Expose symbol-address for functions and globals.<br>
+    </td>
+    <td>
+
+```yaml
+functions:
+  include: # 'exclude' is also available.
+    # Matches using regexp.
+    - [a-z][a-zA-Z0-9]*
+    # '.' matches any character.
+    - prefix.*
+    # Matches with exact name
+    - someFuncName
+    # Full names have higher priority.
+    - anotherName
+  rename:
+    # Regexp groups based replacement.
+    'clang_(.*)': '$1'
+    'clang_dispose': 'dispose'
+    # Removes '_' from beginning.
+    '_(.*)': '$1'
+  symbol-address:
+    # Used to expose symbol address.
+    include:
+      - myFunc
+structs:
+  rename:
+    # Removes prefix underscores
+    # from all structures.
+    '_(.*)': '$1'
+  member-rename:
+    '.*': # Matches any struct.
+      # Removes prefix underscores
+      # from members.
+      '_(.*)': '$1'
+enums:
+  rename:
+    # Regexp groups based replacement.
+    'CXType_(.*)': '$1'
+  member-rename:
+    '(.*)': # Matches any enum.
+      # Removes '_' from beginning
+      # enum member name.
+      '_(.*)': '$1'
+    # Full names have higher priority.
+    'CXTypeKind':
+      # $1 keeps only the 1st
+      # group i.e only '(.*)'.
+      'CXType(.*)': '$1'
+globals:
+  exclude:
+    - aGlobal
+  rename:
+    # Removes '_' from
+    # beginning of a name.
+    '_(.*)': '$1'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>typedefs</td>
+    <td>Filters for referred typedefs.<br><br>
+    Options -<br>
+    - Include/Exclude (referred typedefs only).<br>
+    - Rename typedefs.<br><br>
+    Note: Typedefs that are not referred to anywhere will not be generated.
+    </td>
+    <td>
+
+```yaml
+typedefs:
+  exclude:
+    # Typedefs starting with `p` are not generated.
+    - 'p.*'
+  rename:
+    # Removes '_' from beginning of a typedef.
+    '_(.*)': '$1'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>functions -> expose-typedefs</td>
+    <td>Generate the typedefs to Native and Dart type of a function<br>
+    <b>Default: Inline types are used and no typedefs to Native/Dart
+    type are generated.</b>
+    </td>
+    <td>
+
+```yaml
+functions:
+  expose-typedefs:
+    include:
+      # Match function name.
+      - 'myFunc'
+       # Do this to expose types for all function.
+      - '.*'
+    exclude:
+      # If you only use exclude, then everything
+      # not excluded is generated.
+      - 'dispose'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>structs -> pack</td>
+    <td>Override the @Packed(X) annotation for generated structs.<br><br>
+    <i>Options - none, 1, 2, 4, 8, 16</i><br>
+    You can use RegExp to match with the <b>generated</b> names.<br><br>
+    Note: Ffigen can only reliably identify packing specified using
+    __attribute__((__packed__)). However, structs packed using
+    `#pragma pack(...)` or any other way could <i>potentially</i> be incorrect
+    in which case you can override the generated annotations.
+    </td>
+    <td>
+
+```yaml
+structs:
+  pack:
+    # Matches with the generated name.
+    'NoPackStruct': none # No packing
+    '.*': 1 # Pack all structs with value 1
+```
+  </td>
+  </tr>
+  <tr>
+    <td>comments</td>
+    <td>Extract documentation comments for declarations.<br>
+    The style and length of the comments recognized can be specified with the following options- <br>
+    <i>style: doxygen(default) | any </i><br>
+    <i>length: brief | full(default) </i><br>
+    If you want to disable all comments you can also pass<br>
+    comments: false.
+    </td>
+    <td>
+
+```yaml
+comments:
+  style: any
+  length: full
+```
+  </td>
+  </tr>
+  <tr>
+    <td>structs -> dependency-only<br><br>
+        unions -> dependency-only
+    </td>
+    <td>If `opaque`, generates empty `Opaque` structs/unions if they
+were not included in config (but were added since they are a dependency) and
+only passed by reference(pointer).<br>
+    <i>Options - full(default) | opaque</i><br>
+    </td>
+    <td>
+
+```yaml
+structs:
+  dependency-only: opaque
+unions:
+  dependency-only: opaque
+```
+  </td>
+  </tr>
+  <tr>
+    <td>sort</td>
+    <td>Sort the bindings according to name.<br>
+      <b>Default: false</b>, i.e keep the order as in the source files.
+    </td>
+    <td>
+
+```yaml
+sort: true
+```
+  </td>
+  </tr>
+  <tr>
+    <td>use-supported-typedefs</td>
+    <td>Should automatically map typedefs, E.g uint8_t => Uint8, int16_t => Int16 etc.<br>
+    <b>Default: true</b>
+    </td>
+    <td>
+
+```yaml
+use-supported-typedefs: true
+```
+  </td>
+  </tr>
+  <tr>
+    <td>dart-bool</td>
+    <td>Should generate dart `bool` instead of Uint8 for c99 bool in functions.<br>
+    <b>Default: true</b>
+    </td>
+    <td>
+
+```yaml
+dart-bool: true
+```
+  </td>
+  </tr>
+  <tr>
+    <td>use-dart-handle</td>
+    <td>Should map `Dart_Handle` to `Handle`.<br>
+    <b>Default: true</b>
+    </td>
+    <td>
+
+```yaml
+use-dart-handle: true
+```
+  </td>
+  </tr>
+  <tr>
+    <td>preamble</td>
+    <td>Raw header of the file, pasted as-it-is.</td>
+    <td>
+
+```yaml
+preamble: |
+  // ignore_for_file: camel_case_types, non_constant_identifier_names
+```
+</td>
+  </tr>
+  <tr>
+    <td>typedef-map</td>
+    <td>Map typedefs to Native Types.<br> Values can only be
+    <i>Void, Uint8, Int8, Uint16, Int16, Uint32, Int32, Uint64, Int64, IntPtr, Float and Double.</i>
+    </td>
+    <td>
+
+```yaml
+typedef-map:
+  'my_custom_type': 'IntPtr'
+  'size_t': 'Int64'
+```
+  </td>
+  </tr>
+  <tr>
+    <td>size-map</td>
+    <td>Size of integers to use (in bytes).<br>
+    <b>The defaults (see example) <i>may</i> not be portable on all OS.
+    Do not change these unless absolutely sure.</b>
+    </td>
+    <td>
+
+```yaml
+# These are optional and also default,
+# Omitting any and the default
+# will be used.
+size-map:
+  char: 1
+  unsigned char: 1
+  short: 2
+  unsigned short: 2
+  int: 4
+  unsigned int: 4
+  long: 8
+  unsigned long: 8
+  long long: 8
+  unsigned long long: 8
+  enum: 4
+```
+  </td>
+  </tr>
+</tbody>
+</table>
+
+## Limitations
+1. Multi OS support for types such as long. [Issue #7](https://github.com/dart-lang/ffigen/issues/7)
+
+## Trying out examples
+1. `cd examples/<example_u_want_to_run>`, Run `dart pub get`.
+2. Run `dart run ffigen`.
+
+## Running Tests
+1. Dynamic library for some tests need to be built before running the examples.
+  1. `cd test/native_test`.
+  2. Run `dart build_test_dylib.dart`.
+
+Run tests from the root of the package with `dart run test`.
+> Note: If llvm is not installed in one of the default locations, tests may fail.
+## FAQ
+### Can ffigen be used for removing underscores or renaming declarations?
+Ffigen supports **regexp based renaming**, the regexp must be a
+full match, for renaming you can use regexp groups (`$1` means group 1).
+
+E.g - For renaming `clang_dispose_string` to `string_dispose`.
+We can can match it using `clang_(.*)_(.*)` and rename with `$2_$1`.
+
+Here's an example of how to remove prefix underscores from any struct and its members.
+```yaml
+structs:
+  ...
+  rename:
+    '_(.*)': '$1' # Removes prefix underscores from all structures.
+  member-rename:
+    '.*': # Matches any struct.
+      '_(.*)': '$1' # Removes prefix underscores from members.
+```
+### How to generate declarations only from particular headers?
+The default behaviour is to include everything directly/transitively under
+each of the `entry-points` specified.
+
+If you only want to have declarations directly particular header you can do so
+using `include-directives`. You can use **glob matching** to match header paths.
+```yaml
+headers:
+  entry-points:
+    - 'path/to/my_header.h'
+  include-directives:
+    - '**my_header.h' # This glob pattern matches the header path.
+```
+### Can ffigen filter declarations by name?
+Ffigen supports including/excluding declarations using full regexp matching.
+
+Here's an example to filter functions using names
+```yaml
+functions:
+  include:
+    - 'clang.*' # Include all functions starting with clang.
+  exclude:
+    - '.*dispose': # Exclude all functions ending with dispose.
+```
+This will include `clang_help`. But will exclude `clang_dispose`.
+
+Note: exclude overrides include.
+### How does ffigen handle C Strings?
+
+Ffigen treats `char*` just as any other pointer,(`Pointer<Int8>`).
+To convert these to/from `String`, you can use [package:ffi](https://pub.dev/packages/ffi). Use `ptr.cast<Utf8>().toDartString()` to convert `char*` to dart `string` and `"str".toNativeUtf8()` to convert `string` to `char*`.
+### How does ffigen handle C99 bool data type?
+
+Although `dart:ffi` doesn't have a NativeType for `bool`, they can be implemented as `Uint8`.
+Ffigen generates dart `bool` for function parameters and return type by default.
+To disable this, and use `int` instead, set `dart-bool: false` in configurations.
+
+### How are unnamed enums handled?
+
+Unnamed enums are handled separately, under the key `unnamed-enums`, and are generated as top level constants.
+
+Here's an example that shows how to include/exclude/rename unnamed enums
+```yaml
+unnamed-enums:
+  include:
+    - 'CX_.*'
+  exclude:
+    - '.*Flag'
+  rename:
+    'CXType_(.*)': '$1'
+```
+
+### Why are some struct/union declarations generated even after excluded them in config?
+
+This happens when an excluded struct/union is a dependency to some included declaration.
+(A dependency means a struct is being passed/returned by a function or is member of another struct in some way)
+
+Note: If you supply `structs` -> `dependency-only` as `opaque` ffigen will generate
+these struct dependencies as `Opaque` if they were only passed by reference(pointer).
+```yaml
+structs:
+  dependency-only: opaque
+unions:
+  dependency-only: opaque
+```
+
+### How to expose the native pointers?
+
+By default the native pointers are private, but you can use the
+`symbol-address` subkey for functions/globals and make them public by matching with its name. The pointers are then accesible via `nativeLibrary.addresses`.
+
+Example -
+```yaml
+functions:
+  symbol-address:
+    include:
+      - 'myFunc' # Match function name.
+      - '.*' # Do this to expose all function pointers.
+    exclude: # If you only use exclude, then everything not excluded is generated.
+      - 'dispose'
+```
+
+### How to get typedefs to Native and Dart type of a function?
+
+By default these types are inline. But you can use the `expose-typedef` subkey
+for functions to generate them. This will expose the Native and Dart type.
+E.g - for a function named `hello`, the generated typedefs are named
+as `NativeHello` and `DartHello`.
+
+Example -
+```yaml
+functions:
+  expose-typedefs:
+    include:
+      - 'myFunc' # Match function name.
+      - '.*' # Do this to expose types for all function.
+    exclude: # If you only use exclude, then everything not excluded is generated.
+      - 'dispose'
+```
+
+### How are Structs/Unions/Enums that are reffered to via typedefs handled?
+
+Named declarations use their own names even when inside another typedef.
+However, unnamed declarations inside typedefs take the name of the _first_ typedef
+that refers to them.
+
+### Why are some typedefs not generated?
+
+The following typedefs are not generated -
+- They are not referred to anywhere in the included declarations.
+- They refer to a struct/union having the same name as itself.
+- They refer to a boolean, enum, inline array, Handle or any unsupported type.
